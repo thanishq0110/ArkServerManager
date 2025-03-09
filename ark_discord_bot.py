@@ -90,15 +90,18 @@ async def execute_ark_command(command: str, server_name: str) -> tuple[str, disc
     """Execute ARK server command and return formatted response"""
     # Format command based on type
     if command == "listplayers":
-        cmd = f"arkmanager rconcmd listplayers @{server_name}"
+        cmd = f'arkmanager rconcmd "ListPlayers" @{server_name}'
     elif command.startswith("rconcmd"):
         # Handle RCON commands by ensuring @server is at the end
         rcon_cmd = command.replace('rconcmd ', '')
+        # Ensure the command is wrapped in quotes if not already
+        if not (rcon_cmd.startswith('"') and rcon_cmd.endswith('"')):
+            rcon_cmd = f"\"{rcon_cmd}\""
         cmd = f"arkmanager rconcmd {rcon_cmd} @{server_name}"
     elif command.startswith("broadcast"):
         # Handle broadcast command
         message = command.replace("broadcast ", "")
-        cmd = f"arkmanager rconcmd \"Broadcast {message}\" @{server_name}"
+        cmd = f'arkmanager rconcmd "Broadcast {message}" @{server_name}'
     else:
         # Regular arkmanager commands
         cmd = f"arkmanager {command} @{server_name}"
@@ -115,6 +118,10 @@ async def execute_ark_command(command: str, server_name: str) -> tuple[str, disc
     # Format empty player list response
     if command == "listplayers" and not output.strip():
         output = "No players currently online"
+
+    # Add command execution confirmation if output is empty
+    if not output:
+        output = f"Command executed successfully: {cmd}"
 
     return output, discord.Color.green() if success else discord.Color.red()
 
@@ -270,9 +277,16 @@ async def rcon_command(interaction: discord.Interaction, server: str, command: O
 
             async def on_submit(self, interaction: discord.Interaction):
                 await interaction.response.defer()
-                cmd = f"{command} {self.player_name.value}"
-                output, color = await execute_ark_command(f"rconcmd {cmd}", server)
-                await send_response(interaction, f"🎮 {command}", output, color)
+                try:
+                    # For player commands (KickPlayer, BanPlayer, UnbanPlayer)
+                    cmd = f"\"{command} {self.player_name.value}\""
+                    output, color = await execute_ark_command(f"rconcmd {cmd}", server)
+                    if not output:
+                        output = f"Command executed: {command} on player {self.player_name.value}"
+                    await send_response(interaction, f"🎮 {command}", output, color)
+                except Exception as e:
+                    print(f"Error in {command}: {e}")
+                    await send_response(interaction, f"🎮 {command}", f"Error: {str(e)}", discord.Color.red())
 
         await interaction.response.send_modal(PlayerModal())
         return
@@ -289,8 +303,11 @@ async def rcon_command(interaction: discord.Interaction, server: str, command: O
             async def on_submit(self, interaction: discord.Interaction):
                 await interaction.response.defer()
                 try:
-                    cmd = f"SetTimeOfDay {self.time.value}"
+                    # For SetTimeOfDay command
+                    cmd = f"\"SetTimeOfDay {self.time.value}\""
                     output, color = await execute_ark_command(f"rconcmd {cmd}", server)
+                    if not output:
+                        output = f"Time set to {self.time.value}"
                     await send_response(interaction, "🕒 Set Time", output, color)
                 except Exception as e:
                     print(f"Error in SetTimeOfDay: {e}")
@@ -311,9 +328,16 @@ async def rcon_command(interaction: discord.Interaction, server: str, command: O
 
             async def on_submit(self, interaction: discord.Interaction):
                 await interaction.response.defer()
-                cmd = f"{command} {self.message.value}"
-                output, color = await execute_ark_command(f"rconcmd {cmd}", server)
-                await send_response(interaction, f"📢 {command}", output, color)
+                try:
+                    # For message commands (Broadcast, ServerChat)
+                    cmd = f"\"{command} {self.message.value}\""
+                    output, color = await execute_ark_command(f"rconcmd {cmd}", server)
+                    if not output:
+                        output = f"Message sent: {self.message.value}"
+                    await send_response(interaction, f"📢 {command}", output, color)
+                except Exception as e:
+                    print(f"Error in {command}: {e}")
+                    await send_response(interaction, f"📢 {command}", f"Error: {str(e)}", discord.Color.red())
 
         await interaction.response.send_modal(MessageModal())
         return
