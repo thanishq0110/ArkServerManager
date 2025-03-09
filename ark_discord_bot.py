@@ -92,6 +92,10 @@ class SSHClient:
             output = stdout.read().decode()
             error = stderr.read().decode()
 
+            print(f"📥 Command output: {output}")
+            if error:
+                print(f"⚠️ Command stderr: {error}")
+
             if error and not output:
                 print(f"❌ Command error: {error}")
                 return error, "Error", discord.Color.red()
@@ -179,7 +183,7 @@ class ServerControlView(discord.ui.View):
     @discord.ui.button(label="👥 Players", style=discord.ButtonStyle.gray, custom_id="players")
     async def players_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        output, status, color = await execute_ark_command("listplayers", self.server)
+        output, status, color = await execute_ark_command("listplayer", self.server)
         await send_command_response(interaction, "Player List", self.server, output, status, color)
 
     @discord.ui.button(label="💾 Backup", style=discord.ButtonStyle.gray, custom_id="backup")
@@ -251,10 +255,25 @@ class PlayerActionModal(discord.ui.Modal):
 async def execute_ark_command(command: str, server_name: str) -> tuple[str, str, discord.Color]:
     """Execute ARK server command via SSH and return formatted response"""
     print(f"🎮 Executing ARK command: {command} on server: {server_name}")
-    cmd = f"arkmanager {command} @{server_name}"
-    output, status, color = await ssh_client.execute_command(cmd)
 
-    if "arkmanager not found" in output.lower():
+    # Special handling for player list command
+    if command == "listplayer":
+        cmd = f"arkmanager rconcmd listplayer @{server_name}"
+        print(f"📝 Player list command being executed: {cmd}")
+        print(f"🎯 Server name: {server_name}")
+    elif command.startswith("rconcmd"):
+        # Handle other RCON commands
+        cmd = f"arkmanager rconcmd {command.replace('rconcmd ', '')} @{server_name}"
+    else:
+        cmd = f"arkmanager {command} @{server_name}"
+
+    print(f"🔄 Executing command: {cmd}")
+    output, status, color = await ssh_client.execute_command(cmd)
+    print(f"📤 Raw command output: {output}")
+    print(f"📊 Command status: {status}")
+    print(f"🎨 Command color: {color}")
+
+    if "arkmanager not found" in (output or "").lower():
         print("⚠️ arkmanager not found, attempting installation...")
         install_msg = (
             "❌ Error: arkmanager not found!\n\n"
@@ -263,6 +282,22 @@ async def execute_ark_command(command: str, server_name: str) -> tuple[str, str,
         install_cmd = "curl -sL https://raw.githubusercontent.com/arkmanager/ark-server-tools/master/tools/install.sh | sudo bash -s steam"
         await ssh_client.execute_command(install_cmd)
         return install_msg, "Installing arkmanager", discord.Color.yellow()
+
+    # Clean and format the output
+    if output:
+        # Remove ANSI color codes and clean up whitespace
+        output = re.sub(r'\x1b\[[0-9;]*m', '', output)
+        output = output.strip()
+
+    # Format empty player list response
+    if command == "listplayer":
+        if not output or not output.strip():
+            print("ℹ️ No players online, returning formatted message")
+            output = "No players currently online"
+            status = "Success"
+            color = discord.Color.blue()
+        else:
+            print(f"👥 Found players: {output}")
 
     print(f"📝 Command output status: {status}")
     return output, status, color
@@ -291,7 +326,7 @@ async def send_command_response(interaction, title, server, output, status, colo
             embed.add_field(name="📝 Output", value=f"```{clean_output}```", inline=False)
 
     # Add server info if available
-    servers = get_ark_status()
+    servers = await get_ark_status()
     if servers and server in servers:
         status_emoji = "🟢" if servers[server]["running"] else "🔴"
         players = servers[server]["players"]
@@ -321,7 +356,7 @@ async def send_command_response(interaction, title, server, output, status, colo
         )
         await interaction.followup.send(embed=error_embed)
 
-def get_ark_status():
+async def get_ark_status():
     """Get status of all ARK servers via SSH"""
     try:
         print("📊 Getting ARK servers status...")
@@ -375,7 +410,7 @@ async def control_panel(interaction: discord.Interaction, server: str):
         timestamp=datetime.utcnow()
     )
 
-    servers = get_ark_status()
+    servers = await get_ark_status()
     if servers and server in servers:
         status_emoji = "🟢" if servers[server]["running"] else "🔴"
         players = servers[server]["players"]
@@ -393,7 +428,7 @@ async def control_panel(interaction: discord.Interaction, server: str):
 @app_commands.choices(server=[app_commands.Choice(name=s, value=s) for s in SERVERS])
 async def broadcast(interaction: discord.Interaction, server: str, message: str):
     await interaction.response.defer()
-    cmd = f"arkmanager rconcmd @{server} \"Broadcast {message}\""
+    cmd = f"arkmanager rconcmd {server} \"Broadcast {message}\""
 
     try:
         output, status, color = await ssh_client.execute_command(cmd)
@@ -436,53 +471,13 @@ async def rcon_panel(interaction: discord.Interaction, server: str):
 
     await interaction.response.send_modal(RCONModal())
 
-@bot.tree.command(name="players", description="Open player management panel")
+@bot.tree.command(name="players", description="Get a list of online players")
 @app_commands.choices(server=[app_commands.Choice(name=s, value=s) for s in SERVERS])
-async def player_management(interaction: discord.Interaction, server: str):
+async def players_list(interaction: discord.Interaction, server: str):
+    """Get list of online players"""
     await interaction.response.defer()
-
-    output, status, color = await execute_ark_command("listplayers", server)
-    embed = discord.Embed(
-        title="👥 **Player Management**",
-        description=f"🖥️ Server: **{server}**",
-        color=discord.Color.blue(),
-        timestamp=datetime.utcnow()
-    )
-
-    class PlayerManagementView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=None)
-
-        @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.primary, custom_id="kick")
-        async def kick_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            await interaction.response.send_modal(PlayerActionModal(server, "kick", "Kick Player"))
-
-        @discord.ui.button(label="🚫 Ban", style=discord.ButtonStyle.danger, custom_id="ban")
-        async def ban_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            await interaction.response.send_modal(PlayerActionModal(server, "ban", "Ban Player"))
-
-        @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.gray, custom_id="refresh")
-        async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            await player_management(interaction, server)
-
-    servers = get_ark_status()
-    if servers and server in servers:
-        status_emoji = "🟢" if servers[server]["running"] else "🔴"
-        total_players = servers[server]["players"]
-        embed.add_field(
-            name="📊 Server Status",
-            value=f"{status_emoji} Status: **{'Online' if servers[server]['running'] else 'Offline'}**\n"
-                  f"👥 Total Players: **{total_players}**",
-            inline=False
-        )
-
-    clean_output = output.strip() or "No players online"
-    embed.add_field(name="📝 Online Players", value=f"```{clean_output}```", inline=False)
-    embed.set_footer(text=f"Requested by {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
-    embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
-
-    view = PlayerManagementView()
-    await interaction.followup.send(embed=embed, view=view)
+    output, status, color = await execute_ark_command("listplayer", server)
+    await send_command_response(interaction, "👥 Player List", server, output, status, color)
 
 
 @bot.tree.command(name="info", description="Get detailed server information")
@@ -498,7 +493,7 @@ async def server_info(interaction: discord.Interaction, server: str):
         timestamp=datetime.utcnow()
     )
 
-    servers = get_ark_status()
+    servers = await get_ark_status()
     if servers and server in servers:
         status_emoji = "🟢" if servers[server]["running"] else "🔴"
         players = servers[server]["players"]
@@ -524,7 +519,7 @@ async def server_info(interaction: discord.Interaction, server: str):
         @discord.ui.button(label="👥 Players", style=discord.ButtonStyle.primary)
         async def players(self, interaction: discord.Interaction, button: discord.ui.Button):
             await interaction.response.defer()
-            output, status, color = await execute_ark_command("listplayers", server)
+            output, status, color = await execute_ark_command("listplayer", server)
             await send_command_response(interaction, "Player List", server, output, status, color)
 
     view = QuickActionsView()
@@ -534,7 +529,7 @@ async def server_info(interaction: discord.Interaction, server: str):
 @bot.tree.command(name="serverstatus", description="Get the status of all servers")
 async def get_server_status(interaction: discord.Interaction):
     await interaction.response.defer()
-    servers = get_ark_status()
+    servers = await get_ark_status()
     if not servers:
         embed = discord.Embed(
             title="❌ **Error**",
@@ -574,10 +569,11 @@ async def get_server_status(interaction: discord.Interaction):
     embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
     await interaction.followup.send(embed=embed)
 
+
 @tasks.loop(minutes=2)
 async def update_bot_status():
     """Update bot status with server information"""
-    servers = get_ark_status()
+    servers = await get_ark_status()
     if not servers:
         await bot.change_presence(
             activity=discord.Activity(
@@ -685,7 +681,7 @@ class ModManagementView(discord.ui.View):
         if view.value:
             await interaction.response.defer()
             output, status, color = await execute_ark_command("update --update-mods", self.server)
-            await send_command_response(interaction, "Update Mods", self.server, output, status, color)
+            await send_command_response(interaction, "Update Mods", self.server, output, output, status, color)
 
 class ServerStatsView(discord.ui.View):
     def __init__(self, server: str):
@@ -696,7 +692,7 @@ class ServerStatsView(discord.ui.View):
     async def performance(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         # Get server performance stats
-        cmd = f"arkmanager rconcmd @{self.server} \"stat unit\""
+        cmd = f"arkmanager rconcmd stat unit @{self.server}"
         output, status, color = await ssh_client.execute_command(cmd)
 
         # Parse and format stats
@@ -710,8 +706,8 @@ class ServerStatsView(discord.ui.View):
             timestamp=datetime.utcnow()
         )
         embed.add_field(name="🎯 FPS", value=f"**{fps}** FPS", inline=True)
-        embed.set_footer(text=f"Requested by {interaction.user.name}")
-        embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
+        embed.set_footer(text=f"Requestedby {interaction.user.name}")
+        embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")  # Fixed typo in embed.set_thumbnail
 
         await interaction.followup.send(embed=embed)
 
