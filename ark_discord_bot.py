@@ -7,6 +7,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from dotenv import load_dotenv
 from datetime import datetime
+from typing import Optional
 
 # Load environment variables
 load_dotenv()
@@ -177,13 +178,17 @@ async def broadcast_message(interaction: discord.Interaction, server: str, messa
     output, color = await execute_ark_command(f"broadcast {message}", server)
     await send_response(interaction, f"📢 Broadcast Message: {server}", output, color)
 
-@bot.tree.command(name="rcon", description="Send RCON command to server")
+@bot.tree.command(name="rcon", description="Send RCON command to server (use without command to see help)")
 @app_commands.choices(server=[app_commands.Choice(name=s, value=s) for s in SERVERS])
-async def rcon_command(interaction: discord.Interaction, server: str, command: str = None):
+@app_commands.describe(
+    server="The server to send the command to",
+    command="The RCON command to execute (leave empty to see help)"
+)
+async def rcon_command(interaction: discord.Interaction, server: str, command: Optional[str] = None):
     """Send RCON command to server"""
     await interaction.response.defer()
 
-    if command is None:
+    if not command:
         embed = discord.Embed(
             title="📖 ARK RCON Commands Guide",
             description="Here are some common RCON commands you can use:",
@@ -228,7 +233,7 @@ async def rcon_command(interaction: discord.Interaction, server: str, command: s
             inline=False
         )
 
-        embed.set_footer(text="Use: /rcon <server> <command>")
+        embed.set_footer(text=f"Use: /rcon {server} <command>")
         await interaction.followup.send(embed=embed)
         return
 
