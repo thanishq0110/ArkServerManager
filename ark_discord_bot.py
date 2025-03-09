@@ -46,7 +46,7 @@ class SSHClient:
                 hostname=VPS_HOST,
                 username=VPS_USERNAME,
                 password=VPS_PASSWORD,
-                timeout=30
+                timeout=10
             )
             self.connected = True
             print("✅ SSH connection successful")
@@ -89,42 +89,46 @@ ssh_client = SSHClient()
 
 async def execute_ark_command(command: str, server_name: str) -> tuple[str, discord.Color]:
     """Execute ARK server command and return formatted response"""
-    # Format command based on type
-    if command == "listplayers":
-        cmd = f'arkmanager rconcmd "ListPlayers" @{server_name}'
-    elif command.startswith("rconcmd"):
-        # Handle RCON commands by ensuring @server is at the end
-        rcon_cmd = command.replace('rconcmd ', '')
-        # Ensure the command is wrapped in quotes if not already
-        if not (rcon_cmd.startswith('"') and rcon_cmd.endswith('"')):
-            rcon_cmd = f"\"{rcon_cmd}\""
-        cmd = f"arkmanager rconcmd {rcon_cmd} @{server_name}"
-    elif command.startswith("broadcast"):
-        # Handle broadcast command
-        message = command.replace("broadcast ", "")
-        cmd = f'arkmanager rconcmd "Broadcast {message}" @{server_name}'
-    else:
-        # Regular arkmanager commands
-        cmd = f"arkmanager {command} @{server_name}"
+    try:
+        # Format command based on type
+        if command == "listplayers":
+            cmd = f'arkmanager rconcmd "ListPlayers" @{server_name}'
+        elif command.startswith("rconcmd"):
+            # Handle RCON commands by ensuring @server is at the end
+            rcon_cmd = command.replace('rconcmd ', '')
+            # Ensure the command is wrapped in quotes if not already
+            if not (rcon_cmd.startswith('"') and rcon_cmd.endswith('"')):
+                rcon_cmd = f"\"{rcon_cmd}\""
+            cmd = f"arkmanager rconcmd {rcon_cmd} @{server_name}"
+        elif command.startswith("broadcast"):
+            # Handle broadcast command
+            message = command.replace("broadcast ", "")
+            cmd = f'arkmanager rconcmd "Broadcast {message}" @{server_name}'
+        else:
+            # Regular arkmanager commands
+            cmd = f"arkmanager {command} @{server_name}"
 
-    print(f"📤 Executing command: {cmd}")
-    output, success = await ssh_client.execute_command(cmd)
+        print(f"📤 Executing command: {cmd}")
+        output, success = await ssh_client.execute_command(cmd)
 
-    # Clean ANSI color codes and whitespace
-    output = re.sub(r'\x1b\[[0-9;]*m', '', output).strip()
+        # Clean ANSI color codes and whitespace
+        output = re.sub(r'\x1b\[[0-9;]*m', '', output).strip()
 
-    if not success:
-        return output, discord.Color.red()
+        if not success:
+            return output, discord.Color.red()
 
-    # Format empty player list response
-    if command == "listplayers" and not output.strip():
-        output = "No players currently online"
+        # Format empty player list response
+        if command == "listplayers" and not output.strip():
+            output = "No players currently online"
 
-    # Add command execution confirmation if output is empty
-    if not output:
-        output = f"Command executed successfully: {cmd}"
+        # Add command execution confirmation if output is empty
+        if not output:
+            output = f"Command executed successfully: {cmd}"
 
-    return output, discord.Color.green() if success else discord.Color.red()
+        return output, discord.Color.green() if success else discord.Color.red()
+    except Exception as e:
+        print(f"Error executing ARK command: {e}")
+        return f"Error executing command: {e}", discord.Color.red()
 
 async def send_response(interaction: discord.Interaction, title: str, output: str, color: discord.Color):
     """Send formatted response as Discord embed"""
@@ -154,9 +158,17 @@ async def send_response(interaction: discord.Interaction, title: str, output: st
 @bot.tree.command(name="status", description="Get ARK server status")
 @app_commands.choices(server=[app_commands.Choice(name=s, value=s) for s in SERVERS])
 async def server_status(interaction: discord.Interaction, server: str):
-    await interaction.response.defer()
-    output, color = await execute_ark_command("status", server)
-    await send_response(interaction, f"🖥️ Server Status: {server}", output, color)
+    try:
+        await interaction.response.defer(thinking=True)
+        output, color = await execute_ark_command("status", server)
+        await send_response(interaction, f"🖥️ Server Status: {server}", output, color)
+    except Exception as e:
+        print(f"Error in status command: {e}")
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"Error executing command: {e}", ephemeral=True)
+        except:
+            pass
 
 @bot.tree.command(name="start", description="Start the ARK server")
 @app_commands.choices(server=[app_commands.Choice(name=s, value=s) for s in SERVERS])
