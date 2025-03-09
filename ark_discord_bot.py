@@ -179,16 +179,36 @@ async def broadcast_message(interaction: discord.Interaction, server: str, messa
     await send_response(interaction, f"📢 Broadcast Message: {server}", output, color)
 
 @bot.tree.command(name="rcon", description="Send RCON command to server (use without command to see help)")
-@app_commands.choices(server=[app_commands.Choice(name=s, value=s) for s in SERVERS])
+@app_commands.choices(
+    server=[app_commands.Choice(name=s, value=s) for s in SERVERS],
+    command=[
+        # Player Management
+        app_commands.Choice(name='"ListPlayers" - Show online players', value="\"ListPlayers\""),
+        app_commands.Choice(name='"KickPlayer" - Kick a player', value="\"KickPlayer\""),
+        app_commands.Choice(name='"BanPlayer" - Ban a player', value="\"BanPlayer\""),
+        app_commands.Choice(name='"UnbanPlayer" - Unban a player', value="\"UnbanPlayer\""),
+        # World Management
+        app_commands.Choice(name='"SaveWorld" - Save the current world', value="\"SaveWorld\""),
+        app_commands.Choice(name='"DestroyWildDinos" - Remove all wild creatures', value="\"DestroyWildDinos\""),
+        app_commands.Choice(name='"SetTimeOfDay" - Set world time', value="\"SetTimeOfDay\""),
+        # Server Control
+        app_commands.Choice(name='"Broadcast" - Send message to all', value="\"Broadcast\""),
+        app_commands.Choice(name='"ServerChat" - Send as SERVER', value="\"ServerChat\""),
+        # Information
+        app_commands.Choice(name='"GetChat" - Show recent chat', value="\"GetChat\""),
+        app_commands.Choice(name='"GetGameLog" - Show game log', value="\"GetGameLog\""),
+        app_commands.Choice(name='"ShowMessageOfTheDay" - Show MOTD', value="\"ShowMessageOfTheDay\""),
+    ]
+)
 @app_commands.describe(
     server="The server to send the command to",
-    command="The RCON command to execute (leave empty to see help)"
+    command="Select a command or type a custom RCON command"
 )
 async def rcon_command(interaction: discord.Interaction, server: str, command: Optional[str] = None):
     """Send RCON command to server"""
-    await interaction.response.defer()
 
     if not command:
+        # Show help embed if no command specified
         embed = discord.Embed(
             title="📖 ARK RCON Commands Guide",
             description="Here are some common RCON commands you can use:",
@@ -199,44 +219,107 @@ async def rcon_command(interaction: discord.Interaction, server: str, command: O
         # Player Management
         embed.add_field(
             name="👥 Player Management",
-            value="```\nListPlayers - Show online players\n"
-                  "KickPlayer <name> - Kick a player\n"
-                  "BanPlayer <name> - Ban a player\n"
-                  "UnbanPlayer <name> - Unban a player```",
+            value="```\n\"ListPlayers\" - Show online players\n"
+                  "\"KickPlayer <name>\" - Kick a player\n"
+                  "\"BanPlayer <name>\" - Ban a player\n"
+                  "\"UnbanPlayer <name>\" - Unban a player```",
             inline=False
         )
 
         # World Management
         embed.add_field(
             name="🌍 World Management",
-            value="```\nSaveWorld - Save the current world\n"
-                  "DestroyWildDinos - Remove all wild creatures\n"
-                  "SetTimeOfDay <HH:MM> - Set world time```",
+            value="```\n\"SaveWorld\" - Save the current world\n"
+                  "\"DestroyWildDinos\" - Remove all wild creatures\n"
+                  "\"SetTimeOfDay <HH:MM>\" - Set world time```",
             inline=False
         )
 
         # Server Control
         embed.add_field(
             name="🔧 Server Control",
-            value="```\nBroadcast <message> - Send message to all\n"
-                  "DoExit - Shut down the server\n"
-                  "ServerChat <message> - Send as SERVER```",
+            value="```\n\"Broadcast <message>\" - Send message to all\n"
+                  "\"ServerChat <message>\" - Send as SERVER```",
             inline=False
         )
 
         # Information
         embed.add_field(
             name="ℹ️ Information",
-            value="```\nGetChat - Show recent chat\n"
-                  "GetGameLog - Show game log\n"
-                  "ShowMessageOfTheDay - Show MOTD```",
+            value="```\n\"GetChat\" - Show recent chat\n"
+                  "\"GetGameLog\" - Show game log\n"
+                  "\"ShowMessageOfTheDay\" - Show MOTD```",
             inline=False
         )
 
         embed.set_footer(text=f"Use: /rcon {server} <command>")
-        await interaction.followup.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
         return
 
+    # Handle commands that need additional input
+    command = command.strip('"')  # Remove quotes from the command value
+
+    if command in ["KickPlayer", "BanPlayer", "UnbanPlayer"]:
+        class PlayerModal(discord.ui.Modal, title=f"{command} Command"):
+            player_name = discord.ui.TextInput(
+                label="Player Name",
+                placeholder="Enter the player's name",
+                min_length=1,
+                max_length=100,
+            )
+
+            async def on_submit(self, interaction: discord.Interaction):
+                await interaction.response.defer()
+                cmd = f"{command} {self.player_name.value}"
+                output, color = await execute_ark_command(f"rconcmd {cmd}", server)
+                await send_response(interaction, f"🎮 {command}", output, color)
+
+        await interaction.response.send_modal(PlayerModal())
+        return
+
+    elif command == "SetTimeOfDay":
+        class TimeModal(discord.ui.Modal, title="Set Time Command"):
+            time = discord.ui.TextInput(
+                label="Time (HH:MM)",
+                placeholder="Enter time in 24-hour format (e.g., 14:30)",
+                min_length=5,
+                max_length=5,
+            )
+
+            async def on_submit(self, interaction: discord.Interaction):
+                await interaction.response.defer()
+                try:
+                    cmd = f"SetTimeOfDay {self.time.value}"
+                    output, color = await execute_ark_command(f"rconcmd {cmd}", server)
+                    await send_response(interaction, "🕒 Set Time", output, color)
+                except Exception as e:
+                    print(f"Error in SetTimeOfDay: {e}")
+                    await send_response(interaction, "🕒 Set Time", f"Error: {str(e)}", discord.Color.red())
+
+        await interaction.response.send_modal(TimeModal())
+        return
+
+    elif command in ["Broadcast", "ServerChat"]:
+        class MessageModal(discord.ui.Modal, title=f"{command} Command"):
+            message = discord.ui.TextInput(
+                label="Message",
+                placeholder="Enter your message",
+                min_length=1,
+                max_length=1000,
+                style=discord.TextStyle.paragraph,
+            )
+
+            async def on_submit(self, interaction: discord.Interaction):
+                await interaction.response.defer()
+                cmd = f"{command} {self.message.value}"
+                output, color = await execute_ark_command(f"rconcmd {cmd}", server)
+                await send_response(interaction, f"📢 {command}", output, color)
+
+        await interaction.response.send_modal(MessageModal())
+        return
+
+    # For commands that don't need additional input, execute directly
+    await interaction.response.defer()
     output, color = await execute_ark_command(f"rconcmd {command}", server)
     await send_response(interaction, f"🔧 RCON Command - {server}", output, color)
 
