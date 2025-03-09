@@ -1,61 +1,63 @@
+
 # ARK Server Discord Bot
 
-A Discord bot for managing ARK: Survival Evolved servers using slash commands.
+A powerful Discord bot for managing ARK: Survival Evolved servers remotely.
 
-## Prerequisites
+## Features
 
-1. A VPS with SSH access where your ARK server is running
-2. Python 3.7+ installed on your VPS
-3. Discord Bot Token (from Discord Developer Portal)
+- Server management (start/stop/restart/status)
+- Player management (list/kick/ban/unban)
+- World commands (save/set time/destroy wild dinos)
+- Broadcast messages to players
+- Check for updates
+- Run custom RCON commands
+- Automatic server status monitoring
 
-## Installation
+## Setup Instructions
 
-1. Clone this repository to your VPS
-2. Install required packages:
-```bash
-pip install discord.py python-dotenv paramiko
-```
+1. **Create a .env file with the following credentials:**
+   - Copy `.env.example` to `.env`
+   - Add your Discord bot token
+   - Add your VPS SSH connection details
 
-3. Create a `.env` file with your configuration:
-```env
-# Discord Bot Token
-DISCORD_BOT_TOKEN=your_token_here
+2. **Install dependencies:**
+   - Python 3.11+
+   - discord.py
+   - paramiko
+   - python-dotenv
 
-# VPS Configuration
-VPS_HOST=your_vps_ip_here
-VPS_USERNAME=your_vps_username_here
-VPS_PASSWORD=your_vps_password_here
-```
-
-4. The bot will automatically install arkmanager if it's not found on your VPS.
+3. **Start the bot:**
+   - Run `python ark_discord_bot.py`
+   - The bot will connect to your VPS via SSH
+   - The bot will automatically register slash commands
 
 ## Available Commands
 
-- `/start [server]` - Start the ARK server
-- `/stop [server]` - Stop the ARK server
-- `/restart [server]` - Restart the ARK server
-- `/status [server]` - Get server status
-- `/players [server]` - List online players
-- `/broadcast [server] [message]` - Broadcast a message
-- `/backup [server]` - Create a server backup
-- `/update [server]` - Update server and mods
-- `/rcon [server] [command]` - Execute RCON command
+- `/status <server>` - Get detailed status
+- `/start <server>` - Start server
+- `/stop <server>` - Stop server
+- `/restart <server>` - Restart server
+- `/players <server>` - List online players
+- `/broadcast <server> <message>` - Send message to all players
+- `/ban <server> <player>` - Ban a player
+- `/kick <server> <player>` - Kick a player
+- `/unban <server> <player>` - Unban a player
+- `/backup <server>` - Create a server backup
+- `/update <server>` - Update the server
+- `/saveworld <server>` - Save the world
+- `/destroywilddinos <server>` - Remove all wild creatures
+- `/settime <server> <HH:MM>` - Set in-game time
+- `/getchat <server>` - Get recent chat logs
+- `/rcon <server> <command>` - Run custom RCON command
 
-## Server Instances
-Available server instances:
-- ragnarok
-- fjordur
-- main
-- all
+## Deployment
 
-## Running the Bot
+This bot is designed to run on Replit. To deploy:
 
-```bash
-python ark_discord_bot.py
-```
+1. Click the "Deploy" button
+2. Choose "Scheduled Deployments" or "Reserved VM Deployments"
+3. Follow the setup instructions
 
-The bot will automatically:
-1. Connect to your VPS using SSH
-2. Install arkmanager if not present
-3. Execute commands remotely
-4. Update its status with player count every 2 minutes
+## Requirements
+
+Your ARK server must have arkmanager installed and configured.
