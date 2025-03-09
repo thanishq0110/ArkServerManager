@@ -148,7 +148,6 @@ async def send_response(interaction: discord.Interaction, title: str, output: st
             embed.add_field(name="Output", value=f"```{output}```", inline=False)
 
     embed.set_footer(text=f"Requested by {interaction.user.name}")
-    embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
     await interaction.followup.send(embed=embed)
 
 # Core Commands
@@ -357,7 +356,6 @@ async def help_command(interaction: discord.Interaction):
     )
     
     embed.set_footer(text=f"Requested by {interaction.user.name}")
-    embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
     
     await interaction.response.send_message(embed=embed)
 
