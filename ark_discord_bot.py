@@ -5,8 +5,9 @@ import paramiko
 from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
-from typing import Optional
-from datetime import datetime
+from typing import Optional, Dict
+import re
+from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
@@ -23,6 +24,15 @@ if not all([VPS_HOST, VPS_USERNAME, VPS_PASSWORD]):
 
 # Server instances available
 SERVERS = ["ragnarok", "fjordur", "main", "all"]
+
+# Add new configuration after SERVERS
+ADMIN_ROLE_NAME = "ARK Admin"
+MOD_ROLE_NAME = "ARK Moderator"
+
+# Add new permission check
+def check_permissions(interaction: discord.Interaction, required_role: str) -> bool:
+    """Check if user has required role"""
+    return any(role.name == required_role for role in interaction.user.roles)
 
 # Setup bot with intents
 intents = discord.Intents.default()
@@ -192,6 +202,19 @@ class ServerControlView(discord.ui.View):
             output, status, color = await execute_ark_command("update", self.server)
             await send_command_response(interaction, "Update Server", self.server, output, status, color)
 
+    @discord.ui.button(label="🔧 Mods", style=discord.ButtonStyle.gray, custom_id="mods")
+    async def mods_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        output, status, color = await execute_ark_command("checkmodupdate", self.server)
+        await send_command_response(interaction, "Mod Status", self.server, output, status, color)
+
+    @discord.ui.button(label="📊 Quick Stats", style=discord.ButtonStyle.blurple, custom_id="stats")
+    async def stats_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        output, status, color = await execute_ark_command("status", self.server)
+        await send_command_response(interaction, "Quick Stats", self.server, output, status, color)
+
+
 class PlayerManagementView(discord.ui.View):
     def __init__(self, server: str):
         super().__init__(timeout=None)
@@ -246,8 +269,8 @@ async def execute_ark_command(command: str, server_name: str) -> tuple[str, str,
 
 async def send_command_response(interaction, title, server, output, status, color):
     embed = discord.Embed(
-        title=f"{title}",
-        description=f"Server: **{server}**\nStatus: **{status}**",
+        title=f"**{title}**",
+        description=f"🖥️ Server: **{server}**\n📊 Status: **{status}**",
         color=color,
         timestamp=datetime.utcnow()
     )
@@ -260,29 +283,43 @@ async def send_command_response(interaction, title, server, output, status, colo
             chunks = [clean_output[i:i+1024] for i in range(0, len(clean_output), 1024)]
             for i, chunk in enumerate(chunks, 1):
                 embed.add_field(
-                    name=f"Output (Part {i}/{len(chunks)})", 
+                    name=f"📝 Output (Part {i}/{len(chunks)})", 
                     value=f"```{chunk}```", 
                     inline=False
                 )
         else:
-            embed.add_field(name="Output", value=f"```{clean_output}```", inline=False)
+            embed.add_field(name="📝 Output", value=f"```{clean_output}```", inline=False)
+
+    # Add server info if available
+    servers = get_ark_status()
+    if servers and server in servers:
+        status_emoji = "🟢" if servers[server]["running"] else "🔴"
+        players = servers[server]["players"]
+        embed.add_field(
+            name="📈 Server Stats",
+            value=f"{status_emoji} Status: **{'Online' if servers[server]['running'] else 'Offline'}**\n"
+                  f"👥 Players: **{players}**",
+            inline=True
+        )
 
     embed.set_footer(
-        text=f"Requested by {interaction.user.name}", 
+        text=f"🎮 Requested by {interaction.user.name}", 
         icon_url=interaction.user.avatar.url if interaction.user.avatar else None
     )
+    embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")  # ARK logo
 
     try:
         await interaction.followup.send(embed=embed)
     except discord.HTTPException:
         # If the embed is too large, send a simplified version
         error_embed = discord.Embed(
-            title=f"{title} - Output Too Large",
-            description=f"Server: **{server}**\nStatus: **{status}**\n\nOutput was too large to display fully. Please check the server logs.",
+            title=f"**{title}** - Output Too Large",
+            description=f"🖥️ Server: **{server}**\n"
+                       f"📊 Status: **{status}**\n\n"
+                       f"⚠️ Output was too large to display fully. Please check the server logs.",
             color=color
         )
         await interaction.followup.send(embed=error_embed)
-
 
 def get_ark_status():
     """Get status of all ARK servers via SSH"""
@@ -332,18 +369,22 @@ async def control_panel(interaction: discord.Interaction, server: str):
     await interaction.response.defer()
 
     embed = discord.Embed(
-        title="🎮 ARK Server Control Panel",
+        title="🎮 **ARK Server Control Panel**",
         description=f"Control panel for server: **{server}**",
-        color=discord.Color.blue()
+        color=discord.Color.blue(),
+        timestamp=datetime.utcnow()
     )
 
     servers = get_ark_status()
     if servers and server in servers:
-        status = "🟢 Online" if servers[server]["running"] else "🔴 Offline"
+        status_emoji = "🟢" if servers[server]["running"] else "🔴"
         players = servers[server]["players"]
-        embed.add_field(name="Status", value=status, inline=True)
-        embed.add_field(name="Players", value=str(players), inline=True)
-        embed.add_field(name="Connect", value=f"```{servers[server]['connect']}```", inline=False)
+        embed.add_field(name="📊 Status", value=f"{status_emoji} **{'Online' if servers[server]['running'] else 'Offline'}**", inline=True)
+        embed.add_field(name="👥 Players", value=f"**{players}**", inline=True)
+        embed.add_field(name="🔗 Connect", value=f"```{servers[server]['connect']}```", inline=False)
+
+    embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
+    embed.set_footer(text=f"Control panel opened by {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
 
     view = ServerControlView(server, ssh_client)
     await interaction.followup.send(embed=embed, view=view)
@@ -402,30 +443,169 @@ async def player_management(interaction: discord.Interaction, server: str):
 
     output, status, color = await execute_ark_command("listplayers", server)
     embed = discord.Embed(
-        title="👥 Player Management",
-        description=f"Server: **{server}**",
+        title="👥 **Player Management**",
+        description=f"🖥️ Server: **{server}**",
         color=discord.Color.blue(),
         timestamp=datetime.utcnow()
     )
-    embed.add_field(name="Online Players", value=f"```{output}```", inline=False)
-    embed.set_footer(text=f"Requested by {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
 
-    view = PlayerManagementView(server)
+    class PlayerManagementView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=None)
+
+        @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.primary, custom_id="kick")
+        async def kick_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_modal(PlayerActionModal(server, "kick", "Kick Player"))
+
+        @discord.ui.button(label="🚫 Ban", style=discord.ButtonStyle.danger, custom_id="ban")
+        async def ban_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.send_modal(PlayerActionModal(server, "ban", "Ban Player"))
+
+        @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.gray, custom_id="refresh")
+        async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await player_management(interaction, server)
+
+    servers = get_ark_status()
+    if servers and server in servers:
+        status_emoji = "🟢" if servers[server]["running"] else "🔴"
+        total_players = servers[server]["players"]
+        embed.add_field(
+            name="📊 Server Status",
+            value=f"{status_emoji} Status: **{'Online' if servers[server]['running'] else 'Offline'}**\n"
+                  f"👥 Total Players: **{total_players}**",
+            inline=False
+        )
+
+    clean_output = output.strip() or "No players online"
+    embed.add_field(name="📝 Online Players", value=f"```{clean_output}```", inline=False)
+    embed.set_footer(text=f"Requested by {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
+    embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
+
+    view = PlayerManagementView()
     await interaction.followup.send(embed=embed, view=view)
 
+
+@bot.tree.command(name="info", description="Get detailed server information")
+@app_commands.choices(server=[app_commands.Choice(name=s, value=s) for s in SERVERS])
+async def server_info(interaction: discord.Interaction, server: str):
+    await interaction.response.defer()
+    output, status, color = await execute_ark_command("status", server)
+
+    embed = discord.Embed(
+        title=f"🖥️ **ARK Server Information**",
+        description=f"Detailed information for server: **{server}**",
+        color=discord.Color.blue(),
+        timestamp=datetime.utcnow()
+    )
+
+    servers = get_ark_status()
+    if servers and server in servers:
+        status_emoji = "🟢" if servers[server]["running"] else "🔴"
+        players = servers[server]["players"]
+        connect_link = servers[server]["connect"]
+
+        embed.add_field(
+            name="📊 Server Status",
+            value=f"{status_emoji} Status: **{'Online' if servers[server]['running'] else 'Offline'}**\n"
+                  f"👥 Players: **{players}**\n"
+                  f"🔗 Connect: ```{connect_link}```",
+            inline=False
+        )
+
+    # Add quick action buttons
+    class QuickActionsView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=None)
+
+        @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.gray)
+        async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await server_info(interaction, server)
+
+        @discord.ui.button(label="👥 Players", style=discord.ButtonStyle.primary)
+        async def players(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.defer()
+            output, status, color = await execute_ark_command("listplayers", server)
+            await send_command_response(interaction, "Player List", server, output, status, color)
+
+    view = QuickActionsView()
+    await interaction.followup.send(embed=embed, view=view)
+
+
+@bot.tree.command(name="serverstatus", description="Get the status of all servers")
+async def get_server_status(interaction: discord.Interaction):
+    await interaction.response.defer()
+    servers = get_ark_status()
+    if not servers:
+        embed = discord.Embed(
+            title="❌ **Error**",
+            description="Failed to retrieve server status. Please check server logs.",
+            color=discord.Color.red(),
+            timestamp=datetime.utcnow()
+        )
+        await interaction.followup.send(embed=embed)
+        return
+
+    total_players = sum(info["players"] for info in servers.values() if info["running"])
+    online_servers = sum(1 for info in servers.values() if info["running"])
+
+    embed = discord.Embed(
+        title="🎮 **ARK Server Status**",
+        description=f"📊 Overview\n"
+                   f"💻 Servers Online: **{online_servers}/{len(servers)}**\n"
+                   f"👥 Total Players: **{total_players}**",
+        color=discord.Color.blue(),
+        timestamp=datetime.utcnow()
+    )
+
+    for server_name, server_info in servers.items():
+        status_emoji = "🟢" if server_info["running"] else "🔴"
+        players = server_info["players"]
+        connect_info = f"```{server_info['connect']}```" if server_info["running"] else "*Offline*"
+
+        embed.add_field(
+            name=f"📡 {server_name.capitalize()}",
+            value=f"{status_emoji} Status: **{'Online' if server_info['running'] else 'Offline'}**\n"
+                  f"👥 Players: **{players}**\n"
+                  f"🔗 Connect: {connect_info}",
+            inline=False
+        )
+
+    embed.set_footer(text=f"Requested by {interaction.user.name}", icon_url=interaction.user.avatar.url if interaction.user.avatar else None)
+    embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
+    await interaction.followup.send(embed=embed)
 
 @tasks.loop(minutes=2)
 async def update_bot_status():
     """Update bot status with server information"""
     servers = get_ark_status()
     if not servers:
-        await bot.change_presence(activity=discord.Game(name="⚠️ Error fetching status"))
+        await bot.change_presence(
+            activity=discord.Activity(
+                type=discord.ActivityType.watching,
+                name="⚠️ Server Status Unavailable"
+            )
+        )
         return
 
     total_players = sum(info["players"] for info in servers.values() if info["running"])
     online_servers = sum(1 for info in servers.values() if info["running"])
-    status_message = f"🎮 {total_players} players on {online_servers} servers" if online_servers > 0 else "❌ No servers online"
-    await bot.change_presence(activity=discord.Game(name=status_message))
+
+    if online_servers > 0:
+        status = discord.Status.online
+        activity_type = discord.ActivityType.playing
+        status_message = f"🎮 {total_players} players on {online_servers} servers"
+    else:
+        status = discord.Status.idle
+        activity_type = discord.ActivityType.watching
+        status_message = "❌ No servers online"
+
+    await bot.change_presence(
+        status=status,
+        activity=discord.Activity(
+            type=activity_type,
+            name=status_message
+        )
+    )
 
 @bot.event
 async def on_ready():
@@ -442,5 +622,133 @@ async def on_ready():
         print("❌ Failed to connect to VPS! Please check your credentials.")
     await bot.tree.sync()
     update_bot_status.start()
+
+class ModManagementView(discord.ui.View):
+    def __init__(self, server: str):
+        super().__init__(timeout=None)
+        self.server = server
+
+    @discord.ui.button(label="📥 Check Updates", style=discord.ButtonStyle.primary)
+    async def check_updates(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not check_permissions(interaction, MOD_ROLE_NAME):
+            await interaction.response.send_message("❌ You need the ARK Moderator role to use this command!", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        output, status, color = await execute_ark_command("checkmodupdate", self.server)
+
+        # Parse installed mods
+        mod_ids = []
+        for line in output.split('\n'):
+            if 'Mod ID:' in line:
+                mod_id = line.split(':')[1].strip()
+                mod_ids.append(mod_id)
+
+        embed = discord.Embed(
+            title="📦 **Mod Status**",
+            description=f"Mod information for server: **{self.server}**",
+            color=color,
+            timestamp=datetime.utcnow()
+        )
+
+        if mod_ids:
+            embed.add_field(
+                name="📥 Installed Mods",
+                value=f"```{', '.join(mod_ids)}```",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="📦 Installed Mods",
+                value="No mods installed",
+                inline=False
+            )
+
+        embed.set_footer(text=f"Requested by {interaction.user.name}")
+        embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
+        await interaction.followup.send(embed=embed)
+
+    @discord.ui.button(label="🔄 Update Mods", style=discord.ButtonStyle.success)
+    async def update_mods(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not check_permissions(interaction, ADMIN_ROLE_NAME):
+            await interaction.response.send_message("❌ You need the ARK Admin role to use this command!", ephemeral=True)
+            return
+
+        view = ConfirmView()
+        await interaction.response.send_message(
+            f"⚠️ Are you sure you want to update mods for **{self.server}**?\nThis will restart the server if updates are found.",
+            view=view,
+            ephemeral=True
+        )
+        await view.wait()
+
+        if view.value:
+            await interaction.response.defer()
+            output, status, color = await execute_ark_command("update --update-mods", self.server)
+            await send_command_response(interaction, "Update Mods", self.server, output, status, color)
+
+class ServerStatsView(discord.ui.View):
+    def __init__(self, server: str):
+        super().__init__(timeout=None)
+        self.server = server
+
+    @discord.ui.button(label="📊 Performance", style=discord.ButtonStyle.primary)
+    async def performance(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        # Get server performance stats
+        cmd = f"arkmanager rconcmd @{self.server} \"stat unit\""
+        output, status, color = await ssh_client.execute_command(cmd)
+
+        # Parse and format stats
+        fps_match = re.search(r"Frame:\s*([\d.]+)ms", output)
+        fps = round(1000 / float(fps_match.group(1))) if fps_match else "N/A"
+
+        embed = discord.Embed(
+            title="🖥️ **Server Performance**",
+            description=f"Performance stats for **{self.server}**",
+            color=discord.Color.blue(),
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="🎯 FPS", value=f"**{fps}** FPS", inline=True)
+        embed.set_footer(text=f"Requested by {interaction.user.name}")
+        embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
+
+        await interaction.followup.send(embed=embed)
+
+    @discord.ui.button(label="📈 Resources", style=discord.ButtonStyle.primary)
+    async def resources(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        cmd = "top -bn1 | grep \"Cpu\\|Mem\""
+        output, status, color = await ssh_client.execute_command(cmd)
+
+        # Parse CPU and memory usage
+        lines = output.split('\n')
+        cpu_usage = "N/A"
+        mem_usage = "N/A"
+
+        for line in lines:
+            if 'Cpu' in line:
+                cpu_match = re.search(r"(\d+\.\d+)\s*id", line)
+                if cpu_match:
+                    cpu_usage = f"{100 - float(cpu_match.group(1))}%"
+            elif 'Mem' in line:
+                mem_match = re.search(r"(\d+)\s*free,\s*(\d+)\s*used", line)
+                if mem_match:
+                    total = int(mem_match.group(1)) + int(mem_match.group(2))
+                    used_percent = (int(mem_match.group(2)) / total) * 100
+                    mem_usage = f"{used_percent:.1f}%"
+
+        embed = discord.Embed(
+            title="💻 **Server Resources**",
+            description=f"Resource usage for **{self.server}**",
+            color=discord.Color.blue(),
+            timestamp=datetime.utcnow()
+        )
+        embed.add_field(name="🔄 CPU Usage", value=f"**{cpu_usage}**", inline=True)
+        embed.add_field(name="💾 Memory Usage", value=f"**{mem_usage}**", inline=True)
+        embed.set_footer(text=f"Requested by {interaction.user.name}")
+        embed.set_thumbnail(url="https://i.imgur.com/1Fj9ZlA.png")
+
+        await interaction.followup.send(embed=embed)
 
 bot.run(TOKEN)
