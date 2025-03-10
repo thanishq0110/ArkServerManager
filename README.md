@@ -15,6 +15,11 @@ A Discord bot for managing ARK: Survival Evolved servers using slash commands.
 1. Clone this repository to your local machine
 2. Install required packages:
 ```bash
+pip install discord-py>=2.5.2 paramiko>=3.5.1 python-dotenv>=1.0.1
+```
+
+Alternatively, if you're using pip:
+```bash
 pip install discord.py python-dotenv paramiko
 ```
 
